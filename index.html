@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<!--[if IE]><meta http-equiv="X-UA-Compatible" content="IE=edge"><![endif]-->
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="generator" content="Asciidoctor 1.5.2">
+<meta name="description" content="A guide for creating and managing container-based applications.">
+<title>Container Best Practices</title>
+<link rel="stylesheet" href="http://www.projectatomic.io/stylesheets/application.css">
+</head>
+<body class="article">
+<div id="header">
+<h1>Container Best Practices</h1>
+<div id="toc" class="toc">
+<div id="toctitle">Table of Contents</div>
+<ul class="sectlevel0">
+<li><a href="#Overview">Overview</a></li>
+<li><a href="#plan">Application Planning</a></li>
+<li><a href="#create">Creating Images</a></li>
+<li><a href="#build">Building Applications</a></li>
+</ul>
+</div>
+</div>
+<div id="content">
+<h1 id="Overview" class="sect0">Overview</h1>
+<div class="paragraph">
+<p>Container technology is a popular packaging method for developers and system administrators to build, ship and run distributed applications. Production use of image-based container technology requires a disciplined approach to development. This document provides guidance and recommendations for creating and managing image to control application lifecycle.</p>
+</div>
+<div class="paragraph">
+<p>In <a href="#planning"><strong>Application Planning</strong></a> we discuss how to deconstruct applications into microservices, common types of images and how planning must consider the target deployment platforms.</p>
+</div>
+<div class="paragraph">
+<p><a href="#general_guidelines"><strong>Creating Images</strong></a> discusses the details about how to work with Dockerfiles, best practices, tips and tricks, and tools available to developers.</p>
+</div>
+<div class="paragraph">
+<p>The <a href="#build"><strong>Build</strong></a> section discusses the importance of automation in building, testing and maintaining images. We discuss ideal workflows, how to plan a test environment, types of testing and image certification.</p>
+</div>
+<div class="paragraph">
+<p>Finally, <strong>Delivery</strong> covers how to get images and updates to the end-users, whether that&#8217;s inside an enterprise or public infrastructure. A key consideration is access control.</p>
+</div>
+<h1 id="plan" class="sect0">Application Planning</h1>
+<div class="paragraph">
+<p>Careful planning is important when working with container technology.</p>
+</div>
+<div class="sect1">
+<h2 id="_application_classes">Application Classes</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>There are many different kinds of applications that may be candidates for porting to container technology.</p>
+</div>
+<div class="sect2">
+<h3 id="_system_services">System Services</h3>
+<div class="paragraph">
+<p>System services are a special kind of application. These are drivers or system agents that extend the functionality of the host system. They are typically single-container images. They are typically run using automation during a start-up script like cloud-init or a configuration management system. System service containers require special runtime configuration to enable the appropriate level of privilege to modify the host system. They are commonly referred as Super Privileged Containers (SPCs). They utilize the benefits of container packaging but not separation.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_client_tools">Client Tools</h3>
+<div class="paragraph">
+<p>Client Tools applications are another special kind of application. These are used by end-users who do not wish to install a client using traditional packaging such as RPM. Container technology enables an end-user to add a client to their workstation without modifying the operating system.</p>
+</div>
+<div class="paragraph">
+<p>There are an endless number of potential clients for this class of applications. A few examples include remote clients such as OpenStack or Amazon Web Services (AWS) client tools. An extension of the model is vagrant-like development environment where a tool set for a given project is packaged. For example, Red Hat&#8217;s <a href="https://access.redhat.com/documentation/en/red-hat-enterprise-linux-atomic-host/version-7/getting-started-with-containers/#using_the_atomic_tools_container_image">rhel-tools image</a> is a toolkit for interacting with an immutable Atomic host system. It includes git, strace and sosreport, for example.</p>
+</div>
+<div class="paragraph">
+<p>Two important architectural decisions should be considered for client container images.</p>
+</div>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p>How does the end-user interact with the container? Will they use them like traditional command line interface (CLI) tools? Or will they enter the container environment as a shell, perform some commands, then exit. The entrypoint command chosen for the container will determine the default behavior.</p>
+</li>
+<li>
+<p>Will end-users will need access to files on the host system? If so, will the default behavior bindmount the current working directory or a user-specified directory?</p>
+</li>
+</ol>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_service_components">Service Components</h3>
+<div class="paragraph">
+<p>Service components are applications that an application developer integrates with. Databases are common examples. A database is typically a component of a larger application.</p>
+</div>
+<div class="paragraph">
+<p>The challenge of porting service components to container technology is optimizing integration. Will the application developer be able to configure the service to their needs? Will the application developer have sufficient documentation to install, configure and secure the service being integrated?</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_microservice_applications">Microservice Applications</h3>
+<div class="paragraph">
+<p>The microservice architecture is particularly well-suited to container technology. Martin Fowler describes microservice applications as "suites of independently deployable services."<span class="footnote">[<a id="_footnoteref_1" class="footnote" href="#_footnote_1" title="View footnote.">1</a>]</span> Well-designed microservice applications have a clean separation of code, configuration and data.</p>
+</div>
+<div class="paragraph">
+<p>Planning is especially critical for microservice applications because they are especially challenging to port to container technology. The planning phase must include experts who understand the application&#8217;s architecture and service topology, performance characteristics, configuration and dependencies such as networking and storage. While many applications can be ported to container technology without modification there are sometimes optimizations that should be made regarding configuration, storage, installation or service architecture.</p>
+</div>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_deconstructing_microservice_applications">Deconstructing Microservice Applications</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>The process of deconstructing applications varies widely depending on the complexity and architecture of the application. Consider the following steps as a guide to a generalized process.</p>
+</div>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p>Identify the components that will be broken down into microservices. These typically map to a container images.</p>
+</li>
+<li>
+<p>Identify how the services will communicate. How are REST or message bus interfaces authenticated?</p>
+</li>
+<li>
+<p>Identify how data will be accessed by the services. Which services need read/write access to the storage?</p>
+</li>
+<li>
+<p>Create a service topology drawing to represent the components, lines of communication and storage. This will guide the development work, configuration discussions, debugging and potentially become part of the end-user documentation.</p>
+</li>
+<li>
+<p>Identify how the services will be configured, which services need to share configuration and how these services might be deployed in a highly available configuration.</p>
+</li>
+</ol>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_deployment_platform_considerations">Deployment Platform Considerations</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>Preparing applications for production distribution and deployment must carefully consider the supported deployment platforms. Production services require high uptime, injection of private or sensitive data, storage integration and configuration control. The deployment platform determines methods for load balancing, scheduling and upgrading. A platform that does not provide these services requires additional work when developing the container packaging.</p>
+</div>
+</div>
+</div>
+<h1 id="create" class="sect0">Creating Images</h1>
+<div class="sect1">
+<h2 id="_dockerfiles">Dockerfiles</h2>
+<div class="sectionbody">
+<div class="sect2">
+<h3 id="_location">Location</h3>
+<div class="paragraph">
+<p>Upstream Dockerfiles should be hosted in a public GIT repository, for example <a href="https://github.com">GitHub</a>. Ideally, the repository should be created under the organization relevant to a particular project. For example, <a href="http://www.softwarecollections.org">Software Collections</a> Dockerfiles are available under the GitHub <a href="https://github.com/sclorg">sclorg</a> organization.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_images">Images</h3>
+<div class="paragraph">
+<p>Upstream Docker images, such as CentOS and Fedora base images and layered images based on these, should be publicly available on <a href="https://registry.hub.docker.com/">Docker Hub</a>.</p>
+</div>
+<div class="paragraph">
+<p>For details on using the Docker Hub registry, see <a href="https://docs.docker.com/userguide/dockerimages/">Docker User Guide</a>.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_content">Content</h3>
+<div class="paragraph">
+<p>Docker is a platform that enables applications to be quickly assembled from components. When creating Docker images, think about the added value you can provide potential users with. The intention should always be bringing some added functionality on top of plain package installation.</p>
+</div>
+<div class="paragraph">
+<p>As an example, take this <a href="https://github.com/docker-library/wordpress/blob/618490d4bdff6c5774b84b717979bfe3d6ba8ad1/apache/Dockerfile">Word Press Dockerfile</a>. After running the image and linking it with a database image such as mysql, you will get a fully operational Word Press instance. In addition, you can also specify an external database.</p>
+</div>
+<div class="paragraph">
+<p>This exactly is the purpose of using Docker images; instead of laborious installation and configuration of separate components, you simply pull an image from a registry, acquiring a set of tools ready to be used right out-of-the-box.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_enabling_necessary_repositories">Enabling Necessary Repositories</h3>
+<div class="paragraph">
+<p>TBD</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_clearing_the_yum_caches">Clearing the yum Caches</h3>
+<div class="paragraph">
+<p>To keep images as small as possible, it is beneficial to clear the temporary yum cache files after installing or updating packages. To remove unnecessary cache files, use the <strong>yum clean</strong> command. The command is described in detail in the yum(8) man page.</p>
+</div>
+<div class="paragraph">
+<p>Cache needs to be cleaned out of every layer that updates or installs software. That means if you perform multiple install operations within one layer, you need to run <strong>yum clean</strong> at the end of it. For example:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>RUN yum install -y epel-release &amp;&amp; \
+    rpmkeys --import file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7 &amp;&amp; \
+    yum install -y --setopt=tsflags=nodocs bind-utils gettext iproute\
+    v8314 mongodb24-mongodb mongodb24 &amp;&amp; \
+    yum clean all</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>On the other hand, if you perform multiple install/update operations on multiple layers, <strong>yum clean</strong> must be run on each layer. For example:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>RUN yum install -y epel-release &amp;&amp; \
+    rpmkeys --import file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7 &amp;&amp; \
+    yum clean all
+
+RUN yum install -y --setopt=tsflags=nodocs bind-utils gettext iproute\
+    v8314 mongodb24-mongodb mongodb24 &amp;&amp; \
+    yum clean all</pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_installing_documentation">Installing Documentation</h3>
+<div class="paragraph">
+<p>Because you want to keep the image as small as possible, you can avoid installing documentation files along with installing or updating software by specifying the <strong>nodocs</strong> flag. For example:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>RUN yum install -y mysql --setopt=tsflags=nodocs</pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_updating_software_supplied_by_base_image">Updating Software supplied by Base-Image</h3>
+<div class="paragraph">
+<p>Avoid updating software supplied by base-image unless necessary. Base images themselves are meant to be updated on a regular basis by the supplier and provide software that has been tested for a particular environment.</p>
+</div>
+<div class="paragraph">
+<p>Also, updating base-image software in layered images can introduce unexpected problems or bring in unwanted dependencies and in certain cases significantly expand the image size.</p>
+</div>
+<div class="paragraph">
+<p>In other words, avoid using instructions similar to this one:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>RUN yum -y update</pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_users">Users</h3>
+<div class="paragraph">
+<p>TBD</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_working_directory">Working Directory</h3>
+<div class="paragraph">
+<p>TBD</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_exposing_ports">Exposing Ports</h3>
+<div class="paragraph">
+<p>The EXPOSE instruction declares the ports on which a container will listen for incoming connections. You should specify ports your application commonly uses; for example, as seen in this <a href="https://github.com/openshift/mysql/blob/master/5.5/Dockerfile">mysql</a> example:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>EXPOSE 3306</pre>
+</div>
+</div>
+<div class="admonitionblock important">
+<table>
+<tr>
+<td class="icon">
+<div class="title">Important</div>
+</td>
+<td class="content">
+The TCP/IP port numbers below 1024 are special in that normal users are not allowed to bind on them.
+</td>
+</tr>
+</table>
+</div>
+<div class="paragraph">
+<p>Therefore, for example for Apache server, ports 8080 or 8433 (HTTP or HTTPS) should be exposed. Otherwise, only the root user will be allowed to run Apache server inside a container.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_logging">Logging</h3>
+<div class="paragraph">
+<p>TBD</p>
+</div>
+<div class="paragraph">
+<p>&#8230;&#8203;</p>
+</div>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_dockerfile_instructions">Dockerfile Instructions</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>This chapter provides a list of Docker Instructions with a short explanation and preferred usage.</p>
+</div>
+<div class="sect2">
+<h3 id="_general_usage">General Usage</h3>
+<div class="sect3">
+<h4 id="_maintainer">MAINTAINER</h4>
+<div class="paragraph">
+<p>Use the MAINTAINER instruction to set the <em>Author</em> field of the generated images. As most projects are maintained by more than one person, it is preferable to use a universal contact, such as <em>mailing list address</em>, <em>bug tracking mechanism URL</em> or <em>URL of a project</em> rather than a real person&#8217;s name. Generic contact ensures consistency, allows for addressing problems in an appropriate manner and does not discourage potential contributors from collaborating by being too specific.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_label">LABEL</h4>
+<div class="paragraph">
+<p>Supported in Docker 1.6 and later, LABEL is meant to store metadata about images and containers in key-value pairs. LABELs should provide additional information about images and containers, indexing, searching and should be used to annotate the Docker images and containers. LABEL can also be used to provide useful information to projects that catalogize or utilize Docker images, such as Satellite, OpenShift or Atomic.</p>
+</div>
+<div class="admonitionblock note">
+<table>
+<tr>
+<td class="icon">
+<div class="title">Note</div>
+</td>
+<td class="content">
+Do not get LABEL mistaken with ENV&#8201;&#8212;&#8201;some projects, for example OpenShift, might use ENV to provide metadata temporarily, until LABEL is not fully supported across operating systems.
+</td>
+</tr>
+</table>
+</div>
+<div class="paragraph">
+<p>The following snippet shows usage of LABEL:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>LABEL MYSQL_VERSION           5.5
+LABEL IMAGE_DESCRIPTION       MySQL 5.5
+LABEL IMAGE_TAGS              mysql,mysql55
+LABEL IMAGE_EXPOSE_SERVICES   3306:mysql</pre>
+</div>
+</div>
+<div class="sect4">
+<h5 id="_mandatory_labels">Mandatory LABELs</h5>
+<div class="paragraph">
+<p>The following LABELs should always be part of your Dockerfile. TBD</p>
+</div>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_entrypoint_vs_cmd">ENTRYPOINT vs CMD</h4>
+<div class="paragraph">
+<p>ENTRYPOINT defines the default binary with which the Docker container will start. In other words, it makes the container behave like a binary. The default ENTRYPOINT for Docker is /bin/sh -c. Consider the following example:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>docker run -i -t fedora /bin/bash</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Here /bin/bash is passed as argument to the ENTRYPOINT which is /bin/sh -c. Docker also provides a way to override the entrypoint by providing the --entrypoint flag.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>docker run --entrypoint /bin/cat -i -t fedora /etc/redhat-release</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>In the example above, the default ENTRYPOINT is overridden by the flag and /etc/redhat-release is passed as a parameter to /bin/cat.</p>
+</div>
+<div class="paragraph">
+<p>CMD is used to execute the supplied command as a parameter to the ENTRYPOINT. It is advisable to use CMD unless you are absolutely sure about changing the ENTRYPOINT since all the execution will run as the parameter to the ENTRYPOINT. Using ENTRYPOINT can easily confuse the other users who are not familiar with the image and can make debugging or even obtaining a shell difficult since everything will be a parameter to the ENTRYPOINT</p>
+</div>
+<div class="paragraph">
+<p>CMD Example:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>CMD ["python","myscript.py"]</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>ENTRYPOINT Example:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>ENTRYPOINT ["/usr/bin/python"]</pre>
+</div>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_systemd">systemd</h3>
+<div class="paragraph">
+<p>tbd</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_non_systemd">non-systemd</h3>
+<div class="paragraph">
+<p>tbd</p>
+</div>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_layering">Layering</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>This chapter provides guidelines on creating layers.</p>
+</div>
+<div class="sect2">
+<h3 id="_minimizing_the_number_of_layers">Minimizing the Number of Layers</h3>
+<div class="paragraph">
+<p>In general, having fewer layers improves readability. Commands that are chained together become a part of the same layer. To reduce the number of layers, chain commands together. Find a balance, though, between a large number of layers (and a great many commands), and a small number of layers (and obscurity caused by brevity).</p>
+</div>
+<div class="paragraph">
+<p>A new layer is created for every new instruction defined. This does not necessarily mean that one instruction should be associated with only one command or definition.</p>
+</div>
+<div class="paragraph">
+<p>Ensure transparency and provide a good overview of the content of each layer by grouping related operations together so that they together constitute a single layer. Consider this snippet from the OpenShift Python 3.3 Dockerfile:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>RUN yum install -y \
+    https://www.softwarecollections.org/en/scls/rhscl/python33/epel-7-x86_64/download/rhscl-python33-epel-7-x86_64.noarch.rpm &amp;&amp; \
+    yum install -y --setopt=tsflags=nodocs --enablerepo=centosplus \
+    python33 python33-python-devel python33-python-setuptools \
+    epel-release &amp;&amp; \
+    yum install -y --setopt=tsflags=nodocs install nss_wrapper &amp;&amp; \
+    yum clean all -y &amp;&amp; \
+    scl enable python33 "easy_install pip" &amp;&amp; \
+    chown -R default:default /opt/openshift &amp;&amp; \
+    chmod -R og+rwx /opt/openshift</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Each command that is related to the installation and configuration of <code>sti-python</code> is grouped together as a part of the same layer. This meaningful grouping of operations keeps the number of layers low while keeping the easy legibility of the layers high.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_squashing_layers">Squashing Layers</h3>
+<div class="paragraph">
+<p>tbd</p>
+</div>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_references">References</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>Please see the following resources for more information on the Docker container technology and project-specific guidelines.</p>
+</div>
+<div class="paragraph">
+<p><a href="http://docs.docker.com/">Docker Documentation</a>&#8201;&#8212;&#8201;Detailed information about the Docker platform.</p>
+</div>
+<div class="paragraph">
+<p><a href="https://github.com/openshift/openshift-docs/blob/master/creating_images/guidelines.adoc#openshift-specific-guidelines">OpenShift Guidelines</a>&#8201;&#8212;&#8201;Guidelines for creating images specific to the OpenShift project.</p>
+</div>
+</div>
+</div>
+<h1 id="build" class="sect0">Building Applications</h1>
+<div class="paragraph">
+<p>Building a single Docker image once is a simple matter.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>sudo docker build -t &lt;registry_URL&gt;/some/image .</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>This will build the image which could then be pushed to a registry location. Done. However, this immutable image will need to be updated. And this image depends on other images which will be updated, which means this image will need to be rebuilt. If this image is part of a microservice application it is just one of several images that work together as integrated services that comprise an application. Do you really want a developer to build production services from their laptop?</p>
+</div>
+<div class="paragraph">
+<p>Serious work with container technology should automate builds. While there are some unique challenges specific to container automation, generally following continuous integration and delivery best practices is recommended.</p>
+</div>
+<div class="sect1">
+<h2 id="_build_environment">Build Environment</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>A build environment should have the following characteristics</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>is secure by limiting direct access to the build environment</p>
+</li>
+<li>
+<p>limits access to configure and trigger builds</p>
+</li>
+<li>
+<p>limits access to build sources</p>
+</li>
+<li>
+<p>limits access to base images, those images referenced in the <code>FROM</code> line of a Dockerfile</p>
+</li>
+<li>
+<p>provides access to build logs</p>
+</li>
+<li>
+<p>provides some type of a pipeline or workflow, integrating with external services to trigger builds, report results, etc.</p>
+</li>
+<li>
+<p>provides a way to test built images</p>
+</li>
+<li>
+<p>provides a way to reproduce builds</p>
+</li>
+<li>
+<p>provides a secure registry to store builds</p>
+</li>
+<li>
+<p>provides a mechanism to promote tested builds</p>
+</li>
+<li>
+<p>shares the same kernel as the target production runtime environment</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>A build environment that meets these requirements is difficult to create from scratch. An automation engine like Jenkins is essential to managing a complex pipeline. While a virtual machine-based solution could be created, it is recommended that a dedicated, purpose-built platform such as OpenShift be used.</p>
+</div>
+</div>
+</div>
+</div>
+<div id="footnotes">
+<hr>
+<div class="footnote" id="_footnote_1">
+<a href="#_footnoteref_1">1</a>. Martin Fowler, <a href="http://martinfowler.com/articles/microservices.html" class="bare">http://martinfowler.com/articles/microservices.html</a>
+</div>
+</div>
+<div id="footer">
+<div id="footer-text">
+Last updated 2016-01-20 10:43:31 CST
+</div>
+</div>
+</body>
+</html>
